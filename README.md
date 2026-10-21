@@ -1,8 +1,77 @@
-# ITCS-6190 Assignment 3: AWS Data Processing Pipeline
+# AWS S3 → Lambda → Glue → Athena Data Pipeline
 
-This project demonstrates an end-to-end serverless data processing pipeline on AWS. The process involves ingesting raw data into S3, using a Lambda function to process it, cataloging the data with AWS Glue, and finally, querying and visualizing the results on a dynamic webpage hosted on an EC2 instance.
+An end-to-end AWS analytics pipeline. Raw order files landing in **S3** are filtered by an event-driven **Lambda** function, cataloged by a **Glue crawler**, queried with **Athena** SQL, and served as a live dashboard from a **Flask app on EC2**.
 
-## 1. Amazon S3 Bucket Structure 🪣
+![AWS](https://img.shields.io/badge/AWS-S3%20·%20Lambda%20·%20Glue%20·%20Athena%20·%20EC2-FF9900?logo=amazonaws&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-dashboard-000000?logo=flask&logoColor=white)
+
+## Problem
+
+Order data arrives as raw CSVs full of stale records (old *pending* and *cancelled* orders) that distort revenue reporting. The business needs those records removed automatically on arrival, the clean data made queryable with SQL without managing a database, and the key metrics shown on a page anyone can open.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[orders.csv] --> R[(S3 raw/)]
+    R -- ObjectCreated<br/>prefix raw/ · suffix .csv --> L[Lambda<br/>FilterAndProcessOrders]
+    L -- drop pending/cancelled<br/>orders older than 30 days --> P[(S3 processed/)]
+    P --> C[Glue crawler] --> DC[(Glue Data Catalog<br/>orders_db)]
+    DC --> A[Athena<br/>5 SQL queries]
+    A --> E[(S3 enriched/<br/>query results)]
+    A --> W[Flask app on EC2<br/>port 5000]
+    W --> B[Browser dashboard]
+```
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Storage | Amazon S3 (`raw/` → `processed/` → `enriched/` zones) |
+| Processing | AWS Lambda (Python, `boto3`, S3 event trigger) |
+| Catalog | AWS Glue crawler + Data Catalog |
+| Query | Amazon Athena (Presto SQL) |
+| Serving | Amazon EC2 (Amazon Linux 2023, t2.micro), Flask, `boto3` |
+| Security | IAM roles per service (Lambda, Glue, EC2 instance profile) |
+
+## Results
+
+From the 200-order sample ([`Input File/orders.csv`](Input%20File/orders.csv); query outputs in [`Output File/`](Output%20File/)):
+
+| Metric | Value |
+|---|---|
+| Orders kept after Lambda filtering | **109 of 200** (91 stale pending/cancelled orders removed) |
+| Status mix after filtering | 63 confirmed · 46 shipped |
+| Top customer by total sales | Bob, **$9,211.69** (AOV $307.06) |
+| Busiest month | Feb 2025: 41 orders, **$11,917.41** revenue |
+| Largest February order | O0001, Bob, $478.65 |
+
+> The Lambda's 30-day cutoff is relative to when it runs, so rerunning it later can filter a different number of records.
+
+## Screenshots
+
+**Athena dashboard served from EC2**
+
+<img width="1470" alt="Athena dashboard results 1" src="https://github.com/user-attachments/assets/e35b4645-b079-47c2-834f-bf7e9bfb40c5" />
+<img width="1470" alt="Athena dashboard results 2" src="https://github.com/user-attachments/assets/a8f1ed28-a6fc-4018-ad75-7aa2b8c31795" />
+
+The console screenshots for each setup step are embedded in the step-by-step guide below and stored in [`Output Screenshots/`](Output%20Screenshots/).
+
+## Repo structure
+
+```
+.
+├── LambdaFunction.py        # S3-triggered filter: raw/ → processed/
+├── EC2NanoApp.py            # Flask dashboard that runs the 5 Athena queries
+├── Input File/orders.csv    # sample input (200 orders)
+├── Output File/Query1-5.csv # Athena query results
+└── Output Screenshots/      # step-by-step console screenshots
+```
+
+## How to run: step by step
+
+### 1. Amazon S3 Bucket Structure 🪣
 
 First, set up an S3 bucket with the following folder structure to manage the data workflow:
 
@@ -14,11 +83,11 @@ First, set up an S3 bucket with the following folder structure to manage the dat
 
 ---
 
-## 2. IAM Roles and Permissions 🔐
+### 2. IAM Roles and Permissions 🔐
 
 Create the following IAM roles to grant AWS services the necessary permissions to interact with each other securely.
 
-### Lambda Execution Role
+#### Lambda Execution Role
 
 1.  Navigate to **IAM** -> **Roles** and click **Create role**.
 2.  **Trusted entity type**: Select **AWS service**.
@@ -31,7 +100,7 @@ Create the following IAM roles to grant AWS services the necessary permissions t
 <img width="1470" height="956" alt="3  Lambda IAM" src="https://github.com/user-attachments/assets/ff1d54d5-014e-4777-8537-098126b8e754" />
 
 
-### Glue Service Role
+#### Glue Service Role
 
 1.  Create another IAM role for **AWS service** with the use case **Glue**.
 2.  **Add Permissions**: Attach the following policies:
@@ -42,7 +111,7 @@ Create the following IAM roles to grant AWS services the necessary permissions t
 
 <img width="1470" height="956" alt="4  Glue IAM" src="https://github.com/user-attachments/assets/96db9d6b-747a-473b-b7d8-97c1969248e9" />
 
-### EC2 Instance Profile
+#### EC2 Instance Profile
 
 1.  Create a final IAM role for **AWS service** with the use case **EC2**.
 2.  **Add Permissions**: Attach the following policies:
@@ -54,7 +123,7 @@ Create the following IAM roles to grant AWS services the necessary permissions t
 
 ---
 
-## 3. Create the Lambda Function ⚙️
+### 3. Create the Lambda Function ⚙️
 
 This function will automatically process files uploaded to the `raw/` S3 folder.
 
@@ -65,13 +134,13 @@ This function will automatically process files uploaded to the `raw/` S3 folder.
 5.  **Runtime**: Select **Python 3.9** (or a newer version).
 6.  **Permissions**: Expand *Change default execution role*, select **Use an existing role**, and choose the **Lambda Execution Role** you created.
 7.  Click **Create function**.
-8.  In the **Code source** editor, replace the default code with LambdaFunction.py code for processing the raw data.
+8.  In the **Code source** editor, replace the default code with the code from [`LambdaFunction.py`](LambdaFunction.py) for processing the raw data.
 
 <img width="1470" height="956" alt="6  Lambda function python code" src="https://github.com/user-attachments/assets/f7990eee-81ba-4574-9f81-93c2220c61e5" />
 
 ---
 
-## 4. Configure the S3 Trigger ⚡
+### 4. Configure the S3 Trigger ⚡
 
 Set up the S3 trigger to invoke your Lambda function automatically.
 
@@ -86,11 +155,11 @@ Set up the S3 trigger to invoke your Lambda function automatically.
 <img width="1470" height="956" alt="7  Trigger configuration" src="https://github.com/user-attachments/assets/1997938c-36d7-490f-b2cb-cc8d53b67b31" />
 
 --- 
-**Start Processing of Raw Data**: Now upload the Orders.csv file into the `raw/` folder of the S3 Bucket. This will automatically trigger the Lambda function.
+**Start Processing of Raw Data**: Now upload [`Input File/orders.csv`](Input%20File/orders.csv) into the `raw/` folder of the S3 Bucket. This will automatically trigger the Lambda function.
 ---
 <img width="1470" height="956" alt="2  Uploading input file into raw" src="https://github.com/user-attachments/assets/f07a38da-e337-4a53-a640-68f3e1c65b79" />
 
-## 5. Create a Glue Crawler 🕸️
+### 5. Create a Glue Crawler 🕸️
 
 The crawler will scan your processed data and create a data catalog, making it queryable by Athena.
 
@@ -106,7 +175,7 @@ The crawler will scan your processed data and create a data catalog, making it q
 
 ---
 
-## 6. Query Data with Amazon Athena 🔍
+### 6. Query Data with Amazon Athena 🔍
 
 Navigate to the **Athena** service. Ensure your data source is set to `AwsDataCatalog` and the database is `orders_db`. You can now run SQL queries on your processed data.
 
@@ -121,7 +190,7 @@ Navigate to the **Athena** service. Ensure your data source is set to `AwsDataCa
 
 ---
 
-## 7. Launch the EC2 Web Server 🖥️
+### 7. Launch the EC2 Web Server 🖥️
 
 This instance will host a simple web page to display the Athena query results.
 
@@ -141,7 +210,7 @@ This instance will host a simple web page to display the Athena query results.
 
 ---
 
-## 8. Connect to Your EC2 Instance
+### 8. Connect to Your EC2 Instance
 
 1.  From the EC2 dashboard, select your instance and copy its **Public IPv4 address**.
 2.  Open a terminal or SSH client and connect using your key pair:
@@ -153,7 +222,7 @@ This instance will host a simple web page to display the Athena query results.
 <img width="1470" height="956" alt="24  Connected to EC2 instance" src="https://github.com/user-attachments/assets/01543456-194e-4f86-82f6-b5b13b357063" />
 
 
-## 9. Set Up the Web Environment
+### 9. Set Up the Web Environment
 
 Once connected via SSH, run the following commands to install the necessary software.
 
@@ -172,13 +241,13 @@ Once connected via SSH, run the following commands to install the necessary soft
 
 ---
 
-## 10. Create and Configure the Web Application
+### 10. Create and Configure the Web Application
 
 1.  Create the application file using the `nano` text editor:
     ```bash
     nano app.py
     ```
-2.  Copy and paste your Python web application code (`EC2InstanceNANOapp.py`) into the editor.
+2.  Copy and paste your Python web application code ([`EC2NanoApp.py`](EC2NanoApp.py)) into the editor.
 
 3.  ‼️ **Important**: Update the placeholder variables at the top of the script:
     * `AWS_REGION`: Your AWS region (e.g., `us-east-1`).
@@ -189,7 +258,7 @@ Once connected via SSH, run the following commands to install the necessary soft
 
 ---
 
-## 11. Run the App and View Your Dashboard! 🚀
+### 11. Run the App and View Your Dashboard! 🚀
 
 1.  Execute the Python script to start the web server:
     ```bash
@@ -210,7 +279,7 @@ Once connected via SSH, run the following commands to install the necessary soft
 
 ---
 
-## Important Final Notes
+### Important Final Notes
 
 * **Stopping the Server**: To stop the Flask application, return to your SSH terminal and press `Ctrl + C`.
 * **Cost Management**: This setup uses free-tier services. To prevent unexpected charges, **stop or terminate your EC2 instance** from the AWS console when you are finished.

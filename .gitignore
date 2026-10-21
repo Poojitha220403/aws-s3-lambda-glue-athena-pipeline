@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+# Secrets / AWS
+.env
+.aws/
+*.pem
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
