@@ -5,6 +5,7 @@ An end-to-end AWS analytics pipeline. Raw order files landing in **S3** are filt
 ![AWS](https://img.shields.io/badge/AWS-S3%20·%20Lambda%20·%20Glue%20·%20Athena%20·%20EC2-FF9900?logo=amazonaws&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-dashboard-000000?logo=flask&logoColor=white)
+[![CI](https://github.com/Poojitha220403/aws-s3-lambda-glue-athena-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Poojitha220403/aws-s3-lambda-glue-athena-pipeline/actions/workflows/ci.yml)
 
 ## Problem
 
